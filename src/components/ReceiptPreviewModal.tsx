@@ -3,6 +3,8 @@ import { DairySettings, MilkEntry, BillingSummaryData, NumeralSystem } from '../
 import { OfficialReceipt } from './OfficialReceipt';
 import { X, Download, Printer, Check, Loader2, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 
 interface ReceiptPreviewModalProps {
   isOpen: boolean;
@@ -36,17 +38,87 @@ export const ReceiptPreviewModal: React.FC<ReceiptPreviewModalProps> = ({
     window.print();
   };
 
-  const downloadPDF = () => {
-    // Native print-to-PDF guarantees 100% vector sharpness, complete Marathi ligatures,
-    // zero coordinate shift, and exact 1-page A4 scaling.
-    window.print();
-    setDownloadSuccess(true);
-    confetti({
-      particleCount: 80,
-      spread: 60,
-      origin: { y: 0.6 },
-    });
-    setTimeout(() => setDownloadSuccess(false), 3000);
+  const downloadPDF = async () => {
+    const source = document.getElementById('receipt-print-area');
+    if (!source) return;
+
+    setIsGeneratingPdf(true);
+
+    try {
+      await document.fonts.ready;
+
+      // 1. Create a detached sandbox container
+      const container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.top = '0';
+      container.style.left = '-9999px';
+      container.style.width = '794px';       // Standard A4 width at 96 DPI
+      container.style.minHeight = '1120px';  // Standard A4 height
+      container.style.background = '#ffffff';
+      container.style.zIndex = '-1000';
+      container.style.overflow = 'visible';
+
+      // 2. Clone the receipt into sandbox
+      const clone = source.cloneNode(true) as HTMLElement;
+      clone.style.width = '794px';
+      clone.style.maxWidth = '794px';
+      clone.style.minWidth = '794px';
+      clone.style.padding = '30px 40px';
+      clone.style.boxSizing = 'border-box';
+      clone.style.transform = 'none';
+      clone.style.margin = '0 auto';
+
+      // Force all child elements in the clone to desktop proportions
+      clone.querySelectorAll('*').forEach((el) => {
+        (el as HTMLElement).style.boxSizing = 'border-box';
+      });
+
+      container.appendChild(clone);
+      document.body.appendChild(container);
+
+      try {
+        // 3. Render canvas specifically constrained to 794px
+        const canvas = await html2canvas(clone, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          width: 794,
+          height: 1120,
+          windowWidth: 794,
+          windowHeight: 1120,
+          scrollX: 0,
+          scrollY: 0,
+        });
+
+        const imgData = canvas.toDataURL('image/jpeg', 1.0);
+        const pdf = new jsPDF({
+          orientation: 'portrait',
+          unit: 'mm',
+          format: 'a4',
+        });
+
+        // Exactly 1 full A4 page (210mm x 297mm)
+        pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+        pdf.save('Dudh_Sankalan_Pavti.pdf');
+
+        setDownloadSuccess(true);
+        confetti({
+          particleCount: 80,
+          spread: 60,
+          origin: { y: 0.6 },
+        });
+        setTimeout(() => setDownloadSuccess(false), 3000);
+      } finally {
+        // Clean up sandbox
+        if (document.body.contains(container)) {
+          document.body.removeChild(container);
+        }
+      }
+    } catch (error) {
+      console.error('PDF Generation failed:', error);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   return (
